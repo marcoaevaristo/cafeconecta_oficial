@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 import re
 from datetime import datetime, timedelta
 
-from database import fetch_all, fetch_one, execute, fetch_val
+from api.database import fetch_all, fetch_one, execute, fetch_val
 
 app = FastAPI(title="Café Conecta API", version="1.0.0")
 
