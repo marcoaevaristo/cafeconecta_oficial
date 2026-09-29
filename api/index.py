@@ -4,7 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
+import hashlib
+import hmac
 import httpx
+import secrets
 from bs4 import BeautifulSoup
 import re
 from datetime import datetime, timedelta
@@ -86,6 +89,47 @@ class AlertaRequest(BaseModel):
     preco_maximo: Optional[float] = None
     score_minimo: Optional[int] = None
 
+
+PASSWORD_ITERATIONS = 310_000
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS
+    )
+    return "pbkdf2_sha256${}${}${}".format(
+        PASSWORD_ITERATIONS,
+        salt.hex(),
+        digest.hex(),
+    )
+
+
+def _verify_password(password: str, stored: str) -> tuple[bool, bool]:
+    """Return (valid, needs_upgrade), including legacy test passwords."""
+    if not stored.startswith("pbkdf2_sha256$"):
+        return hmac.compare_digest(password, stored), True
+    try:
+        _, iterations, salt_hex, digest_hex = stored.split("$", 3)
+        digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iterations),
+        )
+    except (ValueError, TypeError):
+        return False, False
+    return hmac.compare_digest(digest.hex(), digest_hex), False
+
+
+def _validate_password(password: str) -> None:
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="A senha deve ter pelo menos 8 caracteres")
+    if not re.search(r"[A-Z]", password) or not re.search(r"[a-z]", password):
+        raise HTTPException(status_code=400, detail="A senha deve ter letras maiúsculas e minúsculas")
+    if not re.search(r"\d", password):
+        raise HTTPException(status_code=400, detail="A senha deve conter pelo menos um número")
+
 # ═══ ROOT ═════════════════════════════════════════════════════
 
 @app.get("/")
@@ -101,23 +145,35 @@ async def health():
 @app.post("/auth/login")
 async def login(req: LoginRequest):
     user = await fetch_one(
-        "SELECT * FROM usuarios WHERE email = $1 AND senha = $2",
-        req.email, req.senha
+        "SELECT * FROM usuarios WHERE LOWER(email) = LOWER($1)",
+        req.email.strip(),
     )
     if not user:
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos")
+    valid, needs_upgrade = _verify_password(req.senha, user["senha"])
+    if not valid:
+        raise HTTPException(status_code=401, detail="E-mail ou senha incorretos")
+    if needs_upgrade:
+        await execute(
+            "UPDATE usuarios SET senha = $1 WHERE id = $2",
+            _hash_password(req.senha),
+            user["id"],
+        )
     user.pop("senha", None)
     return {"usuario": user}
 
 @app.post("/auth/cadastro")
 async def cadastro(req: CadastroRequest):
-    existe = await fetch_one("SELECT id FROM usuarios WHERE email = $1", req.email)
+    _validate_password(req.senha)
+    email = req.email.strip().lower()
+    existe = await fetch_one("SELECT id FROM usuarios WHERE LOWER(email) = $1", email)
     if existe:
         raise HTTPException(status_code=400, detail="E-mail já cadastrado")
     user_id = await fetch_val(
         """INSERT INTO usuarios (nome, email, senha, tipo, empresa, telefone, regiao)
            VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id""",
-        req.nome, req.email, req.senha, req.tipo, req.empresa, req.telefone, req.regiao
+        req.nome.strip(), email, _hash_password(req.senha), req.tipo,
+        req.empresa, req.telefone, req.regiao,
     )
     user = await fetch_one("SELECT * FROM usuarios WHERE id = $1", user_id)
     user.pop("senha", None)
