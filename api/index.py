@@ -264,6 +264,14 @@ async def nao_lidas(usuario_id: int):
     )
     return {"total": count}
 
+@app.post("/mensagens/marcar-lidas/{usuario_id}")
+async def marcar_mensagens_lidas(usuario_id: int):
+    await execute(
+        "UPDATE mensagens SET lida=TRUE WHERE para_usuario_id=$1 AND lida=FALSE",
+        usuario_id,
+    )
+    return {"status": "ok"}
+
 # ═══ AVALIAÇÕES ═══════════════════════════════════════════════
 
 @app.post("/avaliacoes")

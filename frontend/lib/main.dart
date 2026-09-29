@@ -131,6 +131,11 @@ class ApiClient {
     await _request('POST', '/mensagens', body: body);
   }
 
+  Future<int> mensagensNaoLidas(int usuarioId) async {
+    final data = await _request('GET', '/mensagens/nao-lidas/$usuarioId');
+    return (data['total'] as num?)?.toInt() ?? 0;
+  }
+
   Future<List<Map<String, dynamic>>> conversas(int usuarioId) async {
     final data = await _request('GET', '/mensagens/usuario/$usuarioId');
     return List<Map<String, dynamic>>.from(data['mensagens'] ?? const []);
@@ -1137,12 +1142,31 @@ class MarketplacePage extends StatefulWidget {
 
 class _MarketplacePageState extends State<MarketplacePage> {
   late Future<List<Map<String, dynamic>>> future;
+  late Future<int> unreadMessages;
   int minimumScore = 0;
 
   @override
   void initState() {
     super.initState();
     future = widget.api.cafes();
+    unreadMessages = widget.api.mensagensNaoLidas(widget.user['id'] as int);
+  }
+
+  void openMessages() {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => MessagesPage(api: widget.api, user: widget.user),
+          ),
+        )
+        .then((_) {
+          if (mounted) {
+            setState(() {
+              unreadMessages =
+                  widget.api.mensagensNaoLidas(widget.user['id'] as int);
+            });
+          }
+        });
   }
 
   void setMinimumScore(int score) {
@@ -1177,17 +1201,50 @@ class _MarketplacePageState extends State<MarketplacePage> {
                   ],
                 ),
               ),
-              IconButton.filledTonal(
-                tooltip: 'Mensagens',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => MessagesPage(
-                      api: widget.api,
-                      user: widget.user,
-                    ),
-                  ),
-                ),
-                icon: const Icon(Icons.chat_bubble_outline),
+              FutureBuilder<int>(
+                future: unreadMessages,
+                builder: (context, snapshot) {
+                  final unread = snapshot.data ?? 0;
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      IconButton.filledTonal(
+                        tooltip: unread == 0
+                            ? 'Mensagens'
+                            : '$unread mensagens recebidas',
+                        onPressed: openMessages,
+                        icon: const Icon(Icons.chat_bubble_outline),
+                      ),
+                      if (unread > 0)
+                        Positioned(
+                          right: -3,
+                          top: -5,
+                          child: Container(
+                            constraints: const BoxConstraints(
+                              minWidth: 20,
+                              minHeight: 20,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            decoration: BoxDecoration(
+                              color: marketRed,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: milk, width: 2),
+                            ),
+                            child: Center(
+                              child: Text(
+                                unread > 99 ? '99+' : '$unread',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
             ],
           ),
