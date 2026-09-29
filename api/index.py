@@ -242,6 +242,21 @@ async def get_conversa(usuario1: int, usuario2: int):
     )
     return {"mensagens": msgs}
 
+@app.get("/mensagens/usuario/{usuario_id}")
+async def listar_conversas(usuario_id: int):
+    conversas = await fetch_all(
+        """SELECT m.*, CASE WHEN m.de_usuario_id = $1 THEN m.para_usuario_id
+                  ELSE m.de_usuario_id END AS interlocutor_id,
+                  u.nome AS interlocutor_nome
+           FROM mensagens m
+           JOIN usuarios u ON u.id = CASE WHEN m.de_usuario_id = $1
+                                      THEN m.para_usuario_id ELSE m.de_usuario_id END
+           WHERE m.de_usuario_id = $1 OR m.para_usuario_id = $1
+           ORDER BY m.criado_em DESC""",
+        usuario_id,
+    )
+    return {"mensagens": conversas}
+
 @app.get("/mensagens/nao-lidas/{usuario_id}")
 async def nao_lidas(usuario_id: int):
     count = await fetch_val(
